@@ -28,7 +28,6 @@
 #define ADDR_SCAN_LIMIT 0x0B
 #define ADDR_SHUTDOWN 0x0C
 #define ADDR_TEST 0x0F
-
 #define SHUTDOWN_MODE ((ADDR_SHUTDOWN << 8) | 0x00)
 #define NORMAL_MODE ((ADDR_SHUTDOWN << 8) | 0x01)
 
@@ -37,7 +36,13 @@
 
 #define SCAN_ALL ((ADDR_SCAN_LIMIT << 8) | 0x07)
 
-typedef enum Player {
+enum DISPLAY_ERROR{
+    DISP_ERROR_NO_CONN = 0x01,
+    DISP_ERROR_BAD_MOVE,
+    DISP_ERROR_BAD_CMD
+};
+
+typedef enum {
     PLAYER_LOCAL,
     PLAYER_REMOTE
 } player_t;
@@ -46,7 +51,7 @@ void disp_initialize();
 void disp_clear();
 void disp_turnOn();
 void disp_turnOff();
-
+void disp_error(uint8_t num);
 void disp_setTime(time_t time, player_t player);
 void disp_setSegments(uint8_t* disp, player_t player);
 void disp_changeTime(int16_t changeSeconds, player_t player);

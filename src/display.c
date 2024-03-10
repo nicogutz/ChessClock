@@ -1,6 +1,5 @@
 #include "display.h"
 
-
 #include "delay.h"
 #include "spi.h"
 
@@ -43,6 +42,21 @@ void disp_setTime(time_t time, player_t player) {
     disp_setSegments(disp, player);
 }
 
+void disp_error(uint8_t num) {
+    send_command(ADDR_DIGIT_0, 0xB);
+    send_command(ADDR_DIGIT_1, 0xB);
+    send_command(ADDR_DIGIT_2, num / 10);
+    send_command(ADDR_DIGIT_3, num % 10);
+}
+
+void disp_clear(void) {
+    for (uint8_t i = ADDR_DIGIT_0; i <= ADDR_DIGIT_7; i++)
+    {
+        send_command(i, 0x0F);
+    }
+    
+}
+
 void disp_initialize() {
     delay_ms(1);
 
@@ -59,8 +73,7 @@ void disp_initialize() {
     send_command(ADDR_DECODE_MODE, 0xFF);
     send_command(ADDR_SCAN_LIMIT, 0x07);
     send_command(ADDR_INTENSITY, 0x09);
+    disp_clear();
     disp_turnOn();
-    for (uint8_t i = 1; i <= ADDR_DIGIT_7; i++) {
-        send_command(i, 0);
-    }
+    disp_error(DISP_ERROR_NO_CONN);
 }

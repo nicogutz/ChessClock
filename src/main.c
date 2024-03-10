@@ -27,6 +27,9 @@
  */
 
 /* Includes ------------------------------------------------------------------*/
+#include <stdlib.h>
+#include <string.h>
+
 #include "delay.h"
 #include "display.h"
 #include "mirf.h"
@@ -43,6 +46,21 @@
 #define GETCHAR_PROTOTYPE char getchar(void)
 #endif
 /* Private typedef -----------------------------------------------------------*/
+typedef enum {
+    STATE_NOT_CONNECTED,
+    STATE_WAITING_GAME,
+    STATE_LOCAL_PLAYING,
+    STATE_REMOTE_PLAYING,
+    STATE_LOCAL_MOVE
+} states_t;
+enum CLOCK_COMMANDS {
+    CMD_LOCAL_PLAYER_START = 0x00,
+    CMD_REMOTE_PLAYER_START,
+    CMD_BTN_PRESS,
+    CMD_GAME_OVER,
+    CMD_LOCAL_PLAYER_TURN
+};
+
 /* Private define ------------------------------------------------------------*/
 #define CCR1_Val ((uint16_t)976)
 #define CCR2_Val ((uint16_t)488)
@@ -50,10 +68,13 @@
 /* Private macro -------------------------------------------------------------*/
 #define PIN_BUZZZER GPIOD, GPIO_PIN_4
 #define PIN_LED_G GPIOB, GPIO_PIN_4
-#define PIN_LED_R GPIOB, GPIO_PIN_5
+#define PIN_LED_B GPIOB, GPIO_PIN_5
 #define PIN_BTN GPIOB, GPIO_PIN_0
 /* Private variables ---------------------------------------------------------*/
 volatile bool bIntFlag, tIntFlag;
+bool PTX;
+uint8_t buf[32];
+states_t fsmState = STATE_NOT_CONNECTED;
 /* Private function prototypes -----------------------------------------------*/
 static void TIM2_Config(void);
 static void CLK_Config(void);
@@ -73,51 +94,147 @@ void main(void) {
     TIM2_Config();
     GPIO_Config();
     SPI_Config();
-    FSM_Loop();
+
+    while (1) {
+        FSM_Loop();
+    }
 }
 
+void beep(void) {
+    GPIO_WriteHigh(PIN_BUZZZER);
+    delay_ms(1);
+    GPIO_WriteLow(PIN_BUZZZER);
+}
 /**
  * @brief  The main FSM Loop
  */
 static void FSM_Loop(void) {
-    
-    bool PTX = 0;
-    uint8_t buf[32];
-    disp_setTime(10 * 60, PLAYER_LOCAL);
-    disp_setTime(5 * 60, PLAYER_REMOTE);
-    while (1) {
-        // When the program is received, the received data is output from the serial port
-        if (Nrf24_dataReady()) {
-            // Turns the led on when a packet is recived if the button was clicked
+    switch (fsmState) {
+        case STATE_NOT_CONNECTED:
+            // When the program is received, the received data is output from the serial port
+            if (Nrf24_dataReady()) {
+                Nrf24_getData(buf);
+                // The ESP is printing stuff so it takes a while to switch to RX mode.
+                delay_ms(10);
+
+                Nrf24_send(buf, &PTX);
+
+                // Same here, delay a bit.
+                delay_ms(10);
+
+                while (!Nrf24_isSend(50, &PTX)) {
+                    // If no ACK after the preconfigured retries, send again.
+                    Nrf24_send(buf, &PTX);
+                    delay_ms(1);
+                }
+                GPIO_WriteLow(PIN_LED_G);
+                GPIO_WriteLow(PIN_LED_B);
+                fsmState = STATE_WAITING_GAME;
+                disp_setTime(0, PLAYER_LOCAL);
+                disp_setTime(0, PLAYER_REMOTE);
+            }
+            delay_ms(1);
+            break;
+        case STATE_WAITING_GAME:
+            // When the program is received, the received data is output from the serial port
+            if (Nrf24_dataReady() && !Nrf24_rxFifoEmpty()) {
+                GPIO_WriteLow(PIN_LED_G);
+                GPIO_WriteLow(PIN_LED_B);
+                Nrf24_getData(buf);
+                char *end;
+                uint8_t command = (uint8_t)strtoul((char *)buf, &end, 16);  // command is in hexadecimal
+                disp_setTime((time_t)strtoul(end, &end, 16), PLAYER_LOCAL);
+                disp_setTime((time_t)strtoul(end, end, 16), PLAYER_REMOTE);
+                // CLEAR FIFO!
+                while (1) {
+                    if (Nrf24_dataReady() == FALSE) break;
+                    Nrf24_getData(buf);
+                }
+                memset(buf, 0, sizeof(buf));
+
+                switch (command) {
+                    case CMD_LOCAL_PLAYER_START:
+                        fsmState = STATE_LOCAL_PLAYING;
+                        break;
+                    case CMD_REMOTE_PLAYER_START:
+                        fsmState = STATE_REMOTE_PLAYING;
+                        break;
+                    default:
+                        fsmState = STATE_WAITING_GAME;
+                        disp_error(DISP_ERROR_BAD_CMD);
+                        break;
+                }
+            }
+            delay_ms(1);
+            break;
+        case STATE_LOCAL_PLAYING:
+            GPIO_WriteLow(PIN_LED_G);
+            GPIO_WriteHigh(PIN_LED_B);
+
+            if (tIntFlag) {
+                tIntFlag = 0;
+                disp_changeTime(-1, PLAYER_LOCAL);
+            }
+            if (Nrf24_dataReady() && !Nrf24_rxFifoEmpty()) {
+                Nrf24_getData(buf);
+                char *end;
+                uint8_t command = (uint8_t)strtoul((char *)buf, &end, 16);  // command is in hexadecimal
+                switch (command) {
+                    case CMD_GAME_OVER:
+                        fsmState = STATE_WAITING_GAME;
+                        break;
+                    default:
+                        fsmState = STATE_WAITING_GAME;
+                        disp_error(DISP_ERROR_BAD_CMD);
+                        break;
+                }
+            }
             if (bIntFlag) {
                 bIntFlag = 0;
-                GPIO_WriteLow(PIN_LED_G);
-            } else {
-                BEEP_Cmd(ENABLE);
-                GPIO_WriteHigh(PIN_LED_G);
-            }
-
-            Nrf24_getData(buf);
-            // The ESP is printing stuff so it takes a while to switch to RX mode.
-            delay_ms(10);
-
-            Nrf24_send(buf, &PTX);
-
-            // Same here, delay a bit.
-            delay_ms(10);
-
-            while (!Nrf24_isSend(50, &PTX)) {
-                // If no ACK after the preconfigured retries, send again.
+                memset(buf, 0, sizeof(buf));
+                sprintf((char *)buf, "%01X ", (uint8_t)CMD_LOCAL_PLAYER_TURN);
+                delay_ms(10);
                 Nrf24_send(buf, &PTX);
-                delay_ms(1);
+                while (!Nrf24_isSend(50, &PTX)) {
+                    Nrf24_send(buf, &PTX);
+                    delay_ms(10);
+                }
+                fsmState = STATE_REMOTE_PLAYING;
             }
-        }
-        // Wait a bit to check if the NRF recieved data.
-        if (tIntFlag) {
-            tIntFlag = 0;
-            disp_changeTime(-1, PLAYER_LOCAL);
-        }
-        delay_ms(1);
+            delay_ms(1);
+            break;
+        case STATE_REMOTE_PLAYING:
+            bIntFlag = 0;
+            GPIO_WriteLow(PIN_LED_B);
+            GPIO_WriteHigh(PIN_LED_G);
+            if (tIntFlag) {
+                tIntFlag = 0;
+                disp_changeTime(-1, PLAYER_REMOTE);
+            }
+            if (Nrf24_dataReady() && !Nrf24_rxFifoEmpty()) {
+                Nrf24_getData(buf);
+                char *end;
+                uint8_t command = (uint8_t)strtoul((char *)buf, &end, 16);  // command is in hexadecimal
+
+                switch (command) {
+                    case CMD_GAME_OVER:
+                        fsmState = STATE_WAITING_GAME;
+                        break;
+                    case CMD_LOCAL_PLAYER_TURN:
+                        disp_setTime((time_t)strtoul(end, &end, 16), PLAYER_LOCAL);
+                        disp_setTime((time_t)strtoul(end, end, 16), PLAYER_REMOTE);
+                        fsmState = STATE_LOCAL_PLAYING;
+                        break;
+                    default:
+                        fsmState = STATE_WAITING_GAME;
+                        disp_error(DISP_ERROR_BAD_CMD);
+                        break;
+                }
+            }
+            delay_ms(1);
+            break;
+        default:
+            break;
     }
 }
 
@@ -140,7 +257,6 @@ void SPI_Config(void) {
 
     // NRF initialization
     Nrf24_init();
-    bool PTX = 0;
     Nrf24_config(&PTX);
 
     // Set own address using 5 characters
@@ -163,7 +279,6 @@ void SPI_Config(void) {
     Nrf24_SetSpeedDataRates(RF24_1MBPS);
     Nrf24_setRetransmitDelay(1);
 
-    uint8_t buf[32];
     // Clear RX FiFo
     while (1) {
         if (Nrf24_dataReady() == FALSE) {
@@ -178,7 +293,7 @@ void SPI_Config(void) {
  */
 static void GPIO_Config(void) {
     // Debuging LEDs
-    GPIO_Init(PIN_LED_R, GPIO_MODE_OUT_OD_HIZ_FAST);  // Open Drain Mode, since it has to sink current
+    GPIO_Init(PIN_LED_B, GPIO_MODE_OUT_OD_HIZ_FAST);  // Open Drain Mode, since it has to sink current
     GPIO_Init(PIN_LED_G, GPIO_MODE_OUT_OD_HIZ_FAST);
 
     // Button
@@ -189,7 +304,7 @@ static void GPIO_Config(void) {
 
     // Startup Buzzer
     GPIO_Init(PIN_BUZZZER, GPIO_MODE_OUT_PP_HIGH_FAST);
-    delay_ms(10);
+    delay_ms(1);
     GPIO_WriteLow(PIN_BUZZZER);
 }
 
