@@ -10,11 +10,11 @@
  */
 
 /// @brief Generates a delay in ms.
-/// @param ms  time to delay in ms.
-void delay_ms(uint32_t ms)
+/// @param time_ms  time to delay in ms.
+void delay_ms(uint32_t time_ms)
 {
 	uint32_t i;
-	for (i = 0; i < ((F_CPU / 18 / 1000UL) * ms); i++)
+	for (i = 0; i < ((F_CPU / 18 / 1000UL) * time_ms); i++)
 	{
 		__asm__("nop");
 	}

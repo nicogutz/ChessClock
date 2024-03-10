@@ -11,6 +11,7 @@
  * @date   9-December-2023
  ******************************************************************************
  */
+#include <time.h>
 
 /* Memory Map */
 #define ADDR_NO_OP 0x00
@@ -36,22 +37,18 @@
 
 #define SCAN_ALL ((ADDR_SCAN_LIMIT << 8) | 0x07)
 
-typedef struct {
-    uint8_t _MM, _SS;
-} SegmentTime;
-
-typedef enum {
-    LEFT = 0,
-    RIGHT = 1
-} Segment;
+typedef enum Player {
+    PLAYER_LOCAL,
+    PLAYER_REMOTE
+} player_t;
 
 void disp_initialize();
 void disp_clear();
 void disp_turnOn();
 void disp_turnOff();
 
-void disp_setTime(Segment seg, SegmentTime* segTime);
-void increment(Segment seg);
+void disp_setTime(time_t time, player_t player);
+void disp_setSegments(uint8_t* disp, player_t player);
+void disp_changeTime(int16_t changeSeconds, player_t player);
 
-// void disp_
 #endif /* DISPLAY_H */

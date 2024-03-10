@@ -1,4 +1,3 @@
-#include "stm8s.h"
 #ifndef MAIN_MIRF_H_
 #define MAIN_MIRF_H_
 /**
@@ -32,6 +31,9 @@
  * SOFTWARE.
  *
  */
+
+#include "stm8s.h"
+
 /* Memory Map */
 #define CONFIG 0x00
 #define EN_AA 0x01

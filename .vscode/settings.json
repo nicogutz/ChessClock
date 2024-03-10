@@ -4,7 +4,13 @@
         "stdio.h": "c",
         "stm8s.h": "c",
         "display.h": "c",
-        "stm8s_it.h": "c"
+        "stm8s_it.h": "c",
+        "stdint.h": "c",
+        "delay.h": "c",
+        "spi.h": "c",
+        "time.h": "c",
+        "cstdint": "c",
+        "compare": "c"
     },
     "C_Cpp.errorSquiggles": "disabled"
 }

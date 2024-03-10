@@ -32,7 +32,7 @@
 /* Private define ------------------------------------------------------------*/
 /* Private macro -------------------------------------------------------------*/
 /* Private variables ---------------------------------------------------------*/
-extern unsigned int bIntFlag;
+extern bool bIntFlag, tIntFlag;
 /* Private function prototypes -----------------------------------------------*/
 /* Private functions ---------------------------------------------------------*/
 
@@ -262,9 +262,13 @@ INTERRUPT_HANDLER(TIM2_UPD_OVF_BRK_IRQHandler, 13) {
  * @retval None
  */
 INTERRUPT_HANDLER(TIM2_CAP_COM_IRQHandler, 14) {
-    /* In order to detect unexpected events during development,
-       it is recommended to set a breakpoint on the following instruction.
-    */
+    if (TIM2_GetITStatus(TIM2_IT_CC1) != RESET) {
+        /* Clear TIM2 Capture Compare1 interrupt pending bit*/
+        TIM2_ClearITPendingBit(TIM2_IT_CC1);
+
+        /* PG.5 toggles after 1000 ms */
+        tIntFlag = TRUE;
+    }
 }
 #endif /*STM8S903*/
 

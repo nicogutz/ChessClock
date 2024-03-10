@@ -34,8 +34,6 @@
 #include "stm8s.h"
 #include "stm8s_it.h" /* SDCC patch: required by SDCC for interrupts */
 
-/* Private typedef -----------------------------------------------------------*/
-/* Private define ------------------------------------------------------------*/
 /* SDCC patch: ensure same types as stdio.h */
 #if SDCC_VERSION >= 30605  // declaration changed in sdcc 3.6.5 (officially with 3.7.0)
 #define PUTCHAR_PROTOTYPE int putchar(int c)
@@ -44,16 +42,89 @@
 #define PUTCHAR_PROTOTYPE void putchar(char c)
 #define GETCHAR_PROTOTYPE char getchar(void)
 #endif
-
+/* Private typedef -----------------------------------------------------------*/
+/* Private define ------------------------------------------------------------*/
+#define CCR1_Val ((uint16_t)976)
+#define CCR2_Val ((uint16_t)488)
+#define CCR3_Val ((uint16_t)244)
+/* Private macro -------------------------------------------------------------*/
+#define PIN_BUZZZER GPIOD, GPIO_PIN_4
+#define PIN_LED_G GPIOB, GPIO_PIN_4
+#define PIN_LED_R GPIOB, GPIO_PIN_5
+#define PIN_BTN GPIOB, GPIO_PIN_0
 /* Private variables ---------------------------------------------------------*/
-unsigned int bIntFlag;
+volatile bool bIntFlag, tIntFlag;
+/* Private function prototypes -----------------------------------------------*/
+static void TIM2_Config(void);
+static void CLK_Config(void);
+static void GPIO_Config(void);
+static void SPI_Config(void);
+static void FSM_Loop(void);
+/* Private functions ---------------------------------------------------------*/
+/* Public functions ----------------------------------------------------------*/
+/* Private variables ---------------------------------------------------------*/
 /* Private function prototypes -----------------------------------------------*/
 
-void secondary() {
-    GPIO_Init(GPIOD, GPIO_PIN_4, GPIO_MODE_OUT_PP_HIGH_FAST);
-    GPIO_WriteLow(GPIOD, GPIO_PIN_4);
+/**
+ * @brief  Main program.
+ */
+void main(void) {
+    CLK_Config();
+    TIM2_Config();
+    GPIO_Config();
+    SPI_Config();
+    FSM_Loop();
+}
 
-    // beeper_setup();
+/**
+ * @brief  The main FSM Loop
+ */
+static void FSM_Loop(void) {
+    
+    bool PTX = 0;
+    uint8_t buf[32];
+    disp_setTime(10 * 60, PLAYER_LOCAL);
+    disp_setTime(5 * 60, PLAYER_REMOTE);
+    while (1) {
+        // When the program is received, the received data is output from the serial port
+        if (Nrf24_dataReady()) {
+            // Turns the led on when a packet is recived if the button was clicked
+            if (bIntFlag) {
+                bIntFlag = 0;
+                GPIO_WriteLow(PIN_LED_G);
+            } else {
+                BEEP_Cmd(ENABLE);
+                GPIO_WriteHigh(PIN_LED_G);
+            }
+
+            Nrf24_getData(buf);
+            // The ESP is printing stuff so it takes a while to switch to RX mode.
+            delay_ms(10);
+
+            Nrf24_send(buf, &PTX);
+
+            // Same here, delay a bit.
+            delay_ms(10);
+
+            while (!Nrf24_isSend(50, &PTX)) {
+                // If no ACK after the preconfigured retries, send again.
+                Nrf24_send(buf, &PTX);
+                delay_ms(1);
+            }
+        }
+        // Wait a bit to check if the NRF recieved data.
+        if (tIntFlag) {
+            tIntFlag = 0;
+            disp_changeTime(-1, PLAYER_LOCAL);
+        }
+        delay_ms(1);
+    }
+}
+
+/**
+ * @brief  Configure SPI Devices (NRF and 7-Segment Driver)
+ */
+void SPI_Config(void) {
     SPI_Init(
         SPI_FIRSTBIT_MSB,
         SPI_BAUDRATEPRESCALER_64,  // DO NOT USE HIGH BAUD RATES WITH LONG CABLES, _64 if using jumpers _4 works with good PCB ONLY.
@@ -65,33 +136,7 @@ void secondary() {
         (uint8_t)0x07);
 
     SPI_Cmd(ENABLE);
-    // Debuging LEDs
-    GPIO_Init(
-        GPIOB,
-        GPIO_PIN_4,
-        GPIO_MODE_OUT_OD_LOW_FAST);  // Open Drain Mode, since it has to sink current
-    GPIO_Init(
-        GPIOB,
-        GPIO_PIN_5,
-        GPIO_MODE_OUT_OD_LOW_FAST);
-
-    // Turn off LEDs
-    GPIO_WriteHigh(GPIOB, GPIO_PIN_4);
-    GPIO_WriteHigh(GPIOB, GPIO_PIN_5);
-
-    // Button
-    GPIO_Init(
-        GPIOB,
-        GPIO_PIN_0,
-        GPIO_MODE_IN_PU_IT);
-
-    // Interrupt for button
-    EXTI_DeInit();
-    EXTI_SetExtIntSensitivity(EXTI_PORT_GPIOB, EXTI_SENSITIVITY_FALL_ONLY);
-    EXTI_SetTLISensitivity(EXTI_TLISENSITIVITY_FALL_ONLY);
     disp_initialize();
-
-    enableInterrupts();
 
     // NRF initialization
     Nrf24_init();
@@ -116,11 +161,9 @@ void secondary() {
 
     // This has to be set to 1MBps and 150us delay, if using 250kbps, use at least 1000us delay
     Nrf24_SetSpeedDataRates(RF24_1MBPS);
-    Nrf24_setRetransmitDelay(0);
+    Nrf24_setRetransmitDelay(1);
 
-    // Output/Input Buffer
     uint8_t buf[32];
-
     // Clear RX FiFo
     while (1) {
         if (Nrf24_dataReady() == FALSE) {
@@ -128,48 +171,63 @@ void secondary() {
         };
         Nrf24_getData(buf);
     }
-    while (1) {
-        // When the program is received, the received data is output from the serial port
-        if (Nrf24_dataReady()) {
-            // Turns the led on when a packet is recived if the button was clicked
-            if (bIntFlag == 1) {
-                bIntFlag = 0;
-                GPIO_WriteLow(GPIOB, GPIO_PIN_4);
-            } else {
-                BEEP_Cmd(ENABLE);
-                GPIO_WriteHigh(GPIOB, GPIO_PIN_4);
-            }
+}
 
-            Nrf24_getData(buf);
-            // The ESP is printing stuff so it takes a while to switch to RX mode.
-            delay_ms(10);
+/**
+ * @brief  Configure GPIO
+ */
+static void GPIO_Config(void) {
+    // Debuging LEDs
+    GPIO_Init(PIN_LED_R, GPIO_MODE_OUT_OD_HIZ_FAST);  // Open Drain Mode, since it has to sink current
+    GPIO_Init(PIN_LED_G, GPIO_MODE_OUT_OD_HIZ_FAST);
 
-            Nrf24_send(buf, &PTX);
+    // Button
+    GPIO_Init(PIN_BTN, GPIO_MODE_IN_PU_IT);
+    EXTI_DeInit();
+    EXTI_SetExtIntSensitivity(EXTI_PORT_GPIOB, EXTI_SENSITIVITY_FALL_ONLY);
+    EXTI_SetTLISensitivity(EXTI_TLISENSITIVITY_FALL_ONLY);
 
-            // Same here, delay a bit.
-            delay_ms(10);
+    // Startup Buzzer
+    GPIO_Init(PIN_BUZZZER, GPIO_MODE_OUT_PP_HIGH_FAST);
+    delay_ms(10);
+    GPIO_WriteLow(PIN_BUZZZER);
+}
 
-            while (!Nrf24_isSend(50, &PTX)) {
-                // If no ACK after the preconfigured retries, send again.
-                Nrf24_send(buf, &PTX);
-                delay_ms(1);
-            }
-        }
-        // Wait a bit to check if the NRF recieved data.
-        delay_ms(1);
+/**
+ * @brief  Configure system clock to work with external Oscillator
+ * @param  None
+ * @retval None
+ */
+static void CLK_Config(void) {
+    CLK_DeInit();
+    CLK_HSIPrescalerConfig(CLK_PRESCALER_HSIDIV1);
+    enableInterrupts();
+
+    // TODO: Check if this is working
+    if (FALSE) {
+        CLK_CCOConfig(CLK_OUTPUT_MASTER);
+        CLK_ClockSwitchConfig(CLK_SWITCHMODE_AUTO, CLK_SOURCE_HSE, DISABLE, CLK_CURRENTCLOCKSTATE_DISABLE);
     }
 }
 
 /**
- * @brief  Main program.
- * @param  None
- * @retval None
+ * @brief  Configure Output Compare Active Mode for TIM2 Channel1, Channel2 and
+ *         channel3
  */
-void main(void) {
-    /*High speed internal clock prescaler: 1*/
-    CLK_HSIPrescalerConfig(CLK_PRESCALER_HSIDIV1);
+static void TIM2_Config(void) {
+    /* Time base configuration */
+    TIM2_TimeBaseInit(TIM2_PRESCALER_8, 65535);
 
-    secondary();
+    /* Prescaler configuration */
+    TIM2_PrescalerConfig(TIM2_PRESCALER_256, TIM2_PSCRELOADMODE_IMMEDIATE);
+
+    /* Output Compare Active Mode configuration: Channel1 */
+    TIM2_OC1Init(TIM2_OCMODE_TIMING, TIM2_OUTPUTSTATE_DISABLE, CCR1_Val, TIM2_OCPOLARITY_HIGH);
+    TIM2_OC1PreloadConfig(DISABLE);
+    TIM2_ARRPreloadConfig(ENABLE);
+    TIM2_ITConfig(TIM2_IT_CC1, ENABLE);
+    /* TIM2 enable counter */
+    TIM2_Cmd(ENABLE);
 }
 
 #ifdef USE_FULL_ASSERT
