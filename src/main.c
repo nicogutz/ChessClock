@@ -58,7 +58,8 @@ enum CLOCK_COMMANDS {
     CMD_REMOTE_PLAYER_START,
     CMD_BTN_PRESS,
     CMD_GAME_OVER,
-    CMD_LOCAL_PLAYER_TURN
+    CMD_LOCAL_PLAYER_TURN,
+    CMD_WRONG_MOVE
 };
 
 /* Private define ------------------------------------------------------------*/
@@ -100,10 +101,11 @@ void main(void) {
     }
 }
 
-void beep(void) {
+void beep(uint8_t pulse) {
     GPIO_WriteHigh(PIN_BUZZZER);
-    delay_ms(1);
+    delay_ms(pulse);
     GPIO_WriteLow(PIN_BUZZZER);
+    delay_ms(pulse);
 }
 /**
  * @brief  The main FSM Loop
@@ -221,8 +223,14 @@ static void FSM_Loop(void) {
                         fsmState = STATE_WAITING_GAME;
                         break;
                     case CMD_LOCAL_PLAYER_TURN:
+                        beep(50);
                         disp_setTime((time_t)strtoul(end, &end, 16), PLAYER_LOCAL);
                         disp_setTime((time_t)strtoul(end, end, 16), PLAYER_REMOTE);
+                        fsmState = STATE_LOCAL_PLAYING;
+                        break;
+                    case CMD_WRONG_MOVE:
+                        beep(50);
+                        beep(50);
                         fsmState = STATE_LOCAL_PLAYING;
                         break;
                     default:
