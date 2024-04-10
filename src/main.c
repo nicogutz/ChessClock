@@ -56,10 +56,7 @@ typedef enum {
 enum CLOCK_COMMANDS {
     CMD_LOCAL_PLAYER_START = 0x00,
     CMD_REMOTE_PLAYER_START,
-    CMD_BTN_PRESS,
-    CMD_GAME_OVER,
-    CMD_LOCAL_PLAYER_TURN,
-    CMD_WRONG_MOVE
+    CMD_GAME_OVER
 };
 
 /* Private define ------------------------------------------------------------*/
@@ -145,8 +142,8 @@ static void FSM_Loop(void) {
                 Nrf24_getData(buf);
                 char *end;
                 uint8_t command = (uint8_t)strtoul((char *)buf, &end, 16);  // command is in hexadecimal
-                disp_setTime((time_t)strtoul(end, &end, 16), PLAYER_LOCAL);
-                disp_setTime((time_t)strtoul(end, end, 16), PLAYER_REMOTE);
+                disp_setTime((time_t)strtoul(end, &end, 16)/ 1000, PLAYER_LOCAL);
+                disp_setTime((time_t)strtoul(end, end, 16)/ 1000, PLAYER_REMOTE);
                 // CLEAR FIFO!
                 while (1) {
                     if (Nrf24_dataReady() == FALSE) break;
@@ -178,10 +175,27 @@ static void FSM_Loop(void) {
                 disp_changeTime(-1, PLAYER_LOCAL);
             }
             if (Nrf24_dataReady() && !Nrf24_rxFifoEmpty()) {
+                GPIO_WriteLow(PIN_LED_G);
+                GPIO_WriteLow(PIN_LED_B);
                 Nrf24_getData(buf);
                 char *end;
                 uint8_t command = (uint8_t)strtoul((char *)buf, &end, 16);  // command is in hexadecimal
+                disp_setTime((time_t)strtoul(end, &end, 16) / 1000, PLAYER_LOCAL);
+                disp_setTime((time_t)strtoul(end, end, 16) / 1000, PLAYER_REMOTE);
+                // CLEAR FIFO!
+                while (1) {
+                    if (Nrf24_dataReady() == FALSE) break;
+                    Nrf24_getData(buf);
+                }
+                memset(buf, 0, sizeof(buf));
+
                 switch (command) {
+                    case CMD_LOCAL_PLAYER_START:
+                        fsmState = STATE_LOCAL_PLAYING;
+                        break;
+                    case CMD_REMOTE_PLAYER_START:
+                        fsmState = STATE_REMOTE_PLAYING;
+                        break;
                     case CMD_GAME_OVER:
                         fsmState = STATE_WAITING_GAME;
                         break;
@@ -190,18 +204,6 @@ static void FSM_Loop(void) {
                         disp_error(DISP_ERROR_BAD_CMD);
                         break;
                 }
-            }
-            if (bIntFlag) {
-                bIntFlag = 0;
-                memset(buf, 0, sizeof(buf));
-                sprintf((char *)buf, "%01X ", (uint8_t)CMD_LOCAL_PLAYER_TURN);
-                delay_ms(10);
-                Nrf24_send(buf, &PTX);
-                while (!Nrf24_isSend(50, &PTX)) {
-                    Nrf24_send(buf, &PTX);
-                    delay_ms(10);
-                }
-                fsmState = STATE_REMOTE_PLAYING;
             }
             delay_ms(1);
             break;
@@ -214,24 +216,29 @@ static void FSM_Loop(void) {
                 disp_changeTime(-1, PLAYER_REMOTE);
             }
             if (Nrf24_dataReady() && !Nrf24_rxFifoEmpty()) {
+                GPIO_WriteLow(PIN_LED_G);
+                GPIO_WriteLow(PIN_LED_B);
                 Nrf24_getData(buf);
                 char *end;
                 uint8_t command = (uint8_t)strtoul((char *)buf, &end, 16);  // command is in hexadecimal
+                disp_setTime((time_t)strtoul(end, &end, 16)/ 1000, PLAYER_LOCAL);
+                disp_setTime((time_t)strtoul(end, end, 16)/ 1000, PLAYER_REMOTE);
+                // CLEAR FIFO!
+                while (1) {
+                    if (Nrf24_dataReady() == FALSE) break;
+                    Nrf24_getData(buf);
+                }
+                memset(buf, 0, sizeof(buf));
 
                 switch (command) {
+                    case CMD_LOCAL_PLAYER_START:
+                        fsmState = STATE_LOCAL_PLAYING;
+                        break;
+                    case CMD_REMOTE_PLAYER_START:
+                        fsmState = STATE_REMOTE_PLAYING;
+                        break;
                     case CMD_GAME_OVER:
                         fsmState = STATE_WAITING_GAME;
-                        break;
-                    case CMD_LOCAL_PLAYER_TURN:
-                        beep(50);
-                        disp_setTime((time_t)strtoul(end, &end, 16), PLAYER_LOCAL);
-                        disp_setTime((time_t)strtoul(end, end, 16), PLAYER_REMOTE);
-                        fsmState = STATE_LOCAL_PLAYING;
-                        break;
-                    case CMD_WRONG_MOVE:
-                        beep(50);
-                        beep(50);
-                        fsmState = STATE_LOCAL_PLAYING;
                         break;
                     default:
                         fsmState = STATE_WAITING_GAME;
